@@ -2,24 +2,27 @@ import sc2
 from sc2 import run_game, maps, Race, Difficulty
 from sc2.player import Bot, Computer
 from sc2.constants import NEXUS, PROBE, PYLON, ASSIMILATOR, \
- GATEWAY, CYBERNETICSCORE, STALKER
+ GATEWAY, CYBERNETICSCORE, STALKER, STARGATE, VOIDRAY
 import random
+from examples.protoss.cannon_rush import CannonRushBot
 
 
-# General bot class
+# Protoss bot class
 class ProtossBot(sc2.BotAI):
+    def __init__(self):
+        self.ITERATIONS_PER_MINUTE = 165
+        self.MAX_WORKERS = 65
 
     # Execute at every step
     async def on_step(self, iteration):
+        self.iteration = iteration
+
         # Initially are 12 workers
         await self.distribute_workers()
-        # Build more workers
+        # Resources
         await self.build_workers()
-        # Build pylons
         await self.build_pylons()
-        # Build assimilators
         await self.build_assimilators()
-        # Expand
         await self.expand()
         # Offensive force
         await self.offensive_force_buildings()
@@ -28,12 +31,14 @@ class ProtossBot(sc2.BotAI):
 
     # Build workers (PROBE sc2.constants)
     async def build_workers(self):
-        # Nexus built and without production
-        for nexus in self.units(NEXUS).ready.noqueue:
-            # If can afford a PROBE
-            if self.can_afford(PROBE):
-                # Train the probe
-                await self.do(nexus.train(PROBE))
+        if len(self.units(NEXUS))*16 > len(self.units(PROBE)):
+            if len(self.units(PROBE)) < self.MAX_WORKERS:
+                # Nexus built and without production
+                for nexus in self.units(NEXUS).ready.noqueue:
+                    # If can afford a PROBE
+                    if self.can_afford(PROBE):
+                        # Train the probe
+                        await self.do(nexus.train(PROBE))
 
     # Build pylons (PYLON sc2.constants)
     async def build_pylons(self):
@@ -74,7 +79,7 @@ class ProtossBot(sc2.BotAI):
         if self.units(NEXUS).amount < 3 and self.can_afford(NEXUS):
             await self.expand_now()
 
-    # Build offensive force buildings (GATEWAY and CYBERNETICSCORE sc2.constants)
+    # Build offensive force buildings (GATEWAY, CYBERNETICSCORE, STARGATE sc2.constants)
     async def offensive_force_buildings(self):
         if self.units(PYLON).ready.exists:
             # Get a random pylon
@@ -84,15 +89,28 @@ class ProtossBot(sc2.BotAI):
                 if self.can_afford(CYBERNETICSCORE) and not self.already_pending(CYBERNETICSCORE):
                     await self.build(CYBERNETICSCORE, near=pylon)
             # Build a Gateway
-            elif len(self.units(GATEWAY)) < 3:
+            elif len(self.units(GATEWAY)) < ((self.iteration / self.ITERATIONS_PER_MINUTE)/2):
                 if self.can_afford(GATEWAY) and not self.already_pending(GATEWAY):
                     await self.build(GATEWAY, near=pylon)
+            # Build a Stargate
+            if self.units(CYBERNETICSCORE).ready.exists:
+                if len(self.units(STARGATE)) < ((self.iteration / self.ITERATIONS_PER_MINUTE)/2):
+                    if self.can_afford(STARGATE) and not self.already_pending(STARGATE):
+                        await self.build(STARGATE, near=pylon)
 
-    # Build offensive army (STALKER sc2.constants)
+    # Build offensive army (STALKER, VOIDRAY sc2.constants)
     async def build_offensive_force(self):
+        # Gateway
         for gateway in self.units(GATEWAY).ready.noqueue:
-            if self.can_afford(STALKER) and self.supply_left > 0:
-                await self.do(gateway.train(STALKER))
+            # Train stalker
+            if not self.units(STALKER).amount > self.units(VOIDRAY).amount:
+                if self.can_afford(STALKER) and self.supply_left > 0:
+                    await self.do(gateway.train(STALKER))
+        # Stargate
+        for stargate in self.units(STARGATE).ready.noqueue:
+            # Train voidray
+            if self.can_afford(VOIDRAY) and self.supply_left > 0:
+                await self.do(stargate.train(VOIDRAY))
 
     # Find location of the enemy (army, structure, etc)
     def find_target(self, state):
@@ -108,20 +126,27 @@ class ProtossBot(sc2.BotAI):
 
     # Attack the enemy
     async def attack(self):
-        # Attack the base
-        if self.units(STALKER).amount > 15:
-            for stalker in self.units(STALKER).idle:
-                await self.do(stalker.attack(self.find_target(self.state)))
+        # {UNIT: [n to fight, n to defend]}
+        aggressive_units = {
+            STALKER: [15, 5],
+            VOIDRAY: [8, 3]
+        }
 
-        # Attack the enemy army or common unit
-        if self.units(STALKER).amount > 3:
-            if len(self.known_enemy_units) > 0:
-                for stalker in self.units(STALKER).idle:
-                    await self.do(stalker.attack(random.choice(self.known_enemy_units)))
+        for UNIT in aggressive_units:
+            # Attack the base
+            if self.units(UNIT).amount > aggressive_units[UNIT][0] and self.units(UNIT).amount > aggressive_units[UNIT][1]:
+                for unit in self.units(UNIT).idle:
+                    await self.do(unit.attack(self.find_target(self.state)))
+
+            # Attack the enemy army or common unit
+            elif self.units(UNIT).amount > aggressive_units[UNIT][1]:
+                if len(self.known_enemy_units) > 0:
+                    for unit in self.units(UNIT).idle:
+                        await self.do(unit.attack(random.choice(self.known_enemy_units)))
 
 
 # Run the game
 run_game(maps.get("AbyssalReefLE"), [
     Bot(Race.Protoss, ProtossBot()),
-    Computer(Race.Terran, Difficulty.Medium)
+    Bot(Race.Protoss, CannonRushBot())
 ], realtime=False)
