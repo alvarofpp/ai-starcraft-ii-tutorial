@@ -3,6 +3,7 @@ from sc2 import run_game, maps, Race, Difficulty
 from sc2.player import Bot, Computer
 from sc2.constants import NEXUS, PROBE, PYLON, ASSIMILATOR, \
  GATEWAY, CYBERNETICSCORE, STALKER
+import random
 
 
 # General bot class
@@ -23,6 +24,7 @@ class ProtossBot(sc2.BotAI):
         # Offensive force
         await self.offensive_force_buildings()
         await self.build_offensive_force()
+        await self.attack()
 
     # Build workers (PROBE sc2.constants)
     async def build_workers(self):
@@ -78,12 +80,11 @@ class ProtossBot(sc2.BotAI):
             # Get a random pylon
             pylon = self.units(PYLON).ready.random
             # Build a Cybernetics Core
-            if self.units(GATEWAY).ready.exists:
-                if not self.units(CYBERNETICSCORE):
-                    if self.can_afford(CYBERNETICSCORE) and not self.already_pending(CYBERNETICSCORE):
-                        await self.build(CYBERNETICSCORE, near=pylon)
+            if self.units(GATEWAY).ready.exists and not self.units(CYBERNETICSCORE):
+                if self.can_afford(CYBERNETICSCORE) and not self.already_pending(CYBERNETICSCORE):
+                    await self.build(CYBERNETICSCORE, near=pylon)
             # Build a Gateway
-            else:
+            elif len(self.units(GATEWAY)) < 3:
                 if self.can_afford(GATEWAY) and not self.already_pending(GATEWAY):
                     await self.build(GATEWAY, near=pylon)
 
@@ -93,9 +94,34 @@ class ProtossBot(sc2.BotAI):
             if self.can_afford(STALKER) and self.supply_left > 0:
                 await self.do(gateway.train(STALKER))
 
+    # Find location of the enemy (army, structure, etc)
+    def find_target(self, state):
+        # Army or common unit
+        if len(self.known_enemy_units) > 0:
+            return random.choice(self.known_enemy_units)
+        # Structure
+        elif len(self.known_enemy_structures) > 0:
+            return random.choice(self.known_enemy_structures)
+        # First location known
+        else:
+            return self.enemy_start_locations[0]
+
+    # Attack the enemy
+    async def attack(self):
+        # Attack the base
+        if self.units(STALKER).amount > 15:
+            for stalker in self.units(STALKER).idle:
+                await self.do(stalker.attack(self.find_target(self.state)))
+
+        # Attack the enemy army or common unit
+        if self.units(STALKER).amount > 3:
+            if len(self.known_enemy_units) > 0:
+                for stalker in self.units(STALKER).idle:
+                    await self.do(stalker.attack(random.choice(self.known_enemy_units)))
+
 
 # Run the game
 run_game(maps.get("AbyssalReefLE"), [
     Bot(Race.Protoss, ProtossBot()),
-    Computer(Race.Terran, Difficulty.Easy)
+    Computer(Race.Terran, Difficulty.Medium)
 ], realtime=False)
