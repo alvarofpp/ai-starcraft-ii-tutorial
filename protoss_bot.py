@@ -1,7 +1,8 @@
 import sc2
 from sc2 import run_game, maps, Race, Difficulty
 from sc2.player import Bot, Computer
-from sc2.constants import NEXUS, PROBE, PYLON, ASSIMILATOR
+from sc2.constants import NEXUS, PROBE, PYLON, ASSIMILATOR, \
+ GATEWAY, CYBERNETICSCORE, STALKER
 
 
 # General bot class
@@ -19,6 +20,9 @@ class ProtossBot(sc2.BotAI):
         await self.build_assimilators()
         # Expand
         await self.expand()
+        # Offensive force
+        await self.offensive_force_buildings()
+        await self.build_offensive_force()
 
     # Build workers (PROBE sc2.constants)
     async def build_workers(self):
@@ -64,8 +68,30 @@ class ProtossBot(sc2.BotAI):
 
     # Expand the empire
     async def expand(self):
+        # Max 3 nexus
         if self.units(NEXUS).amount < 3 and self.can_afford(NEXUS):
             await self.expand_now()
+
+    # Build offensive force buildings (GATEWAY and CYBERNETICSCORE sc2.constants)
+    async def offensive_force_buildings(self):
+        if self.units(PYLON).ready.exists:
+            # Get a random pylon
+            pylon = self.units(PYLON).ready.random
+            # Build a Cybernetics Core
+            if self.units(GATEWAY).ready.exists:
+                if not self.units(CYBERNETICSCORE):
+                    if self.can_afford(CYBERNETICSCORE) and not self.already_pending(CYBERNETICSCORE):
+                        await self.build(CYBERNETICSCORE, near=pylon)
+            # Build a Gateway
+            else:
+                if self.can_afford(GATEWAY) and not self.already_pending(GATEWAY):
+                    await self.build(GATEWAY, near=pylon)
+
+    # Build offensive army (STALKER sc2.constants)
+    async def build_offensive_force(self):
+        for gateway in self.units(GATEWAY).ready.noqueue:
+            if self.can_afford(STALKER) and self.supply_left > 0:
+                await self.do(gateway.train(STALKER))
 
 
 # Run the game
