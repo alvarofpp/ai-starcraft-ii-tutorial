@@ -62,10 +62,10 @@ class ProtossBot(sc2.BotAI):
                 move_to = self.random_location_variance(enemy_location)
                 await self.do(scout.move(move_to))
 
-            else:
-                for rf in self.units(ROBOTICSFACILITY).ready.noqueue:
-                    if self.can_afford(OBSERVER) and self.supply_left > 0:
-                        await self.do(rf.train(OBSERVER))
+        else:
+            for rf in self.units(ROBOTICSFACILITY).ready.noqueue:
+                if self.can_afford(OBSERVER) and self.supply_left > 0:
+                    await self.do(rf.train(OBSERVER))
 
     async def intel(self):
         game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
@@ -97,7 +97,7 @@ class ProtossBot(sc2.BotAI):
         for enemy_building in self.known_enemy_structures:
             pos = enemy_building.position
             if enemy_building.name.lower() in main_base_names:
-                cv2.circle(game_data, (int(pos[0]), int(pos[1])), 15, (0, 0, 255), -1)
+                cv2.circle(game_data, (int(pos[0]), int(pos[1])), 12, (0, 0, 255), -1)
 
         for enemy_unit in self.known_enemy_units:
             if not enemy_unit.is_structure:
