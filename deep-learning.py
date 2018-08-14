@@ -25,7 +25,7 @@ class ProtossBot(sc2.BotAI):
         print(game_result)
 
         if game_result == Result.Victory:
-            np.save("train_data/{}.npy".format(str(int(time.time()))), np.array(self.train_data))
+            np.save("train_data_new/{}.npy".format(str(int(time.time()))), np.array(self.train_data))
 
     # Execute at every step
     async def on_step(self, iteration):
