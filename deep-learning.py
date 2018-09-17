@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 import time
 import keras
+import math
 
 HEADLESS = True
 
@@ -21,7 +22,10 @@ class ProtossBot(sc2.BotAI):
         self.do_something_after = 0
         self.train_data = []
         self.use_model = use_model
-        
+
+        # { UNIT_TAG : LOCATION }
+        self.scouts_and_spots = {}
+
         if self.use_model:
             print("using model")
             self.model = keras.models.load_model("models/BasicCNN-30-epochs-0.0001-LR-4.2")
@@ -36,7 +40,8 @@ class ProtossBot(sc2.BotAI):
     # Execute at every step
     async def on_step(self, iteration):
         # self.iteration = iteration
-        self.time = (self.status.game_loop/22.4) / 60
+        self.time = (self.status.game_loop / 22.4) / 60
+        await self.build_scout()
         await self.scout()
 
         # Initially are 12 workers
@@ -53,12 +58,19 @@ class ProtossBot(sc2.BotAI):
         # Deep learning
         await self.intel()
 
+    async def build_scout(self):
+        if len(self.units(OBSERVER)) < math.floor(self.time / 3):
+            for rf in self.units(ROBOTICSFACILITY).ready.noqueue:
+                print(len(self.units(OBSERVER)), self.time / 3)
+                if self.can_afford(OBSERVER) and self.supply_left > 0:
+                    await self.do(rf.train(OBSERVER))
+
     def random_location_variance(self, enemy_start_location):
         x = enemy_start_location[0]
         y = enemy_start_location[1]
 
-        x += ((random.randrange(-20, 20)) / 100) * enemy_start_location[0]
-        y += ((random.randrange(-20, 20)) / 100) * enemy_start_location[1]
+        x += random.randrange(-5, 5)
+        y += random.randrange(-5, 5)
 
         if x < 0:
             x = 0
@@ -73,18 +85,64 @@ class ProtossBot(sc2.BotAI):
         return go_to
 
     async def scout(self):
-        if len(self.units(OBSERVER)) > 0:
-            scout = self.units(OBSERVER)[0]
+        # { DISTANCE_TO_ENEMY_START : EXPANSIONLOC }
+        self.expand_dis_dir = {}
+        for el in self.expansion_locations:
+            distance_to_enemy_start = el.distance_to(self.enemy_start_location[0])
+            self.expand_dis_dir[distance_to_enemy_start] = el
+        self.ordered_exp_distances = sorted(k for k in self.expand_dis_dir)
 
-            if scout.is_idle:
-                enemy_location = self.enemy_start_locations[0]
-                move_to = self.random_location_variance(enemy_location)
-                await self.do(scout.move(move_to))
+        existing_ids = [unit.tag for unit in self.units]
+        to_be_removed = []
+        for noted_scout in self.scouts_and_spots:
+            if noted_scout not in existing_ids:
+                to_be_removed.append(noted_scout)
 
+        for scout in to_be_removed:
+            del self.scouts_and_spots[scout]
+
+        if len(self.units(ROBOTICSFACILITY).ready) == 0:
+            unit_type = PROBE
+            unit_limit = 1
         else:
-            for rf in self.units(ROBOTICSFACILITY).ready.noqueue:
-                if self.can_afford(OBSERVER) and self.supply_left > 0:
-                    await self.do(rf.train(OBSERVER))
+            unit_type = OBSERVER
+            unit_limit = 15
+
+        assign_scout = True
+
+        if unit_type == PROBE:
+            for unit in self.units(PROBE):
+                if unit.tag in self.scouts_and_spots:
+                    assign_scout = False
+
+        if assign_scout:
+            if len(self.units(unit_type).idle) > 0:
+                for obs in self.units(unit_type).idle[:unit_limit]:
+                    if obs.tag not in self.scouts_and_spots:
+                        for dist in self.ordered_exp_distances:
+                            try:
+                                location = self.expand_dis_dir[
+                                    dist]  # next(value for key, value in self.expand_dis_dir.items if key == dist)
+                                active_locations = [self.scouts_and_spots[k] for k in self.scouts_and_spots]
+
+                                if location not in active_locations:
+                                    if unit_type == PROBE:
+                                        for unit in self.units(PROBE):
+                                            if unit.tag in self.scouts_and_spots:
+                                                continue
+                                    await self.do(obs.move(location))
+                                    self.scouts_and_spots[obs.tag] = location
+                                    break
+
+
+                            except Exception as e:
+                                # print(str(e))
+                                pass
+
+        for obs in self.units(unit_type):
+            if obs.tag in self.scouts_and_spots:
+                if obs in [probe for probe in self.units(PROBE)]:
+                    await self.do(obs.move(self.random_location_variance(self.scouts_and_spots[obs.tag])))
 
     async def intel(self):
         game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
