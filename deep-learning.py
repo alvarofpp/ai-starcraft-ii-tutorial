@@ -2,23 +2,29 @@ import sc2
 from sc2 import run_game, maps, Race, Difficulty, position, Result
 from sc2.player import Bot, Computer
 from sc2.constants import NEXUS, PROBE, PYLON, ASSIMILATOR, \
- GATEWAY, CYBERNETICSCORE, STARGATE, VOIDRAY, \
- OBSERVER, ROBOTICSFACILITY
+    GATEWAY, CYBERNETICSCORE, STARGATE, VOIDRAY, \
+    OBSERVER, ROBOTICSFACILITY
 import random
 import cv2
 import numpy as np
 import time
+import keras
 
 HEADLESS = True
 
 
 # Protoss bot class
 class ProtossBot(sc2.BotAI):
-    def __init__(self):
-        self.ITERATIONS_PER_MINUTE = 165
+    def __init__(self, use_model=False):
+        # self.ITERATIONS_PER_MINUTE = 165
         self.MAX_WORKERS = 65
         self.do_something_after = 0
         self.train_data = []
+        self.use_model = use_model
+        
+        if self.use_model:
+            print("using model")
+            self.model = keras.models.load_model("models/BasicCNN-30-epochs-0.0001-LR-4.2")
 
     def on_end(self, game_result):
         print('--- on_end called ---')
@@ -29,7 +35,8 @@ class ProtossBot(sc2.BotAI):
 
     # Execute at every step
     async def on_step(self, iteration):
-        self.iteration = iteration
+        # self.iteration = iteration
+        self.time = (self.status.game_loop/22.4) / 60
         await self.scout()
 
         # Initially are 12 workers
@@ -50,8 +57,8 @@ class ProtossBot(sc2.BotAI):
         x = enemy_start_location[0]
         y = enemy_start_location[1]
 
-        x += ((random.randrange(-20, 20))/100) * enemy_start_location[0]
-        y += ((random.randrange(-20, 20))/100) * enemy_start_location[1]
+        x += ((random.randrange(-20, 20)) / 100) * enemy_start_location[0]
+        y += ((random.randrange(-20, 20)) / 100) * enemy_start_location[1]
 
         if x < 0:
             x = 0
@@ -81,10 +88,10 @@ class ProtossBot(sc2.BotAI):
 
     async def intel(self):
         game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
-        
+
         # UNIT: [SIZE, (BGR Color)]
         draw_dict = {
-            NEXUS: [12, (0, 255, 0)],
+            NEXUS: [15, (0, 255, 0)],
             PYLON: [3, (20, 235, 0)],
             PROBE: [1, (55, 200, 0)],
             ASSIMILATOR: [2, (35, 200, 0)],
@@ -141,19 +148,21 @@ class ProtossBot(sc2.BotAI):
 
         plausible_supply = self.supply_cap / 200.0
 
-        military_weight = len(self.units(VOIDRAY)) / (self.supply_cap-self.supply_left)
+        military_weight = len(self.units(VOIDRAY)) / (self.supply_cap - self.supply_left)
         if military_weight > 1.0:
             military_weight = 1.0
 
-
-        cv2.line(game_data, (0, 19), (int(line_max*military_weight), 19), (250, 250, 200), 3) # worker/supply ratio
-        cv2.line(game_data, (0, 15), (int(line_max*plausible_supply), 15), (220, 200, 200), 3) # plausible supply (supply/200.0)
-        cv2.line(game_data, (0, 11), (int(line_max*population_ratio), 11), (150, 150, 150), 3) # population ratio (supply_left/supply)
-        cv2.line(game_data, (0, 7), (int(line_max*vespene_ratio), 7), (210, 200, 0), 3) # gas / 1500
-        cv2.line(game_data, (0, 3), (int(line_max*mineral_ratio), 3), (0, 255, 25), 3) # minerals minerals/1500
+        cv2.line(game_data, (0, 19), (int(line_max * military_weight), 19), (250, 250, 200), 3)  # worker/supply ratio
+        cv2.line(game_data, (0, 15), (int(line_max * plausible_supply), 15), (220, 200, 200),
+                 3)  # plausible supply (supply/200.0)
+        cv2.line(game_data, (0, 11), (int(line_max * population_ratio), 11), (150, 150, 150),
+                 3)  # population ratio (supply_left/supply)
+        cv2.line(game_data, (0, 7), (int(line_max * vespene_ratio), 7), (210, 200, 0), 3)  # gas / 1500
+        cv2.line(game_data, (0, 3), (int(line_max * mineral_ratio), 3), (0, 255, 25), 3)  # minerals minerals/1500
 
         # Flip horizontally to make our final fix in visual representation
         self.flipped = cv2.flip(game_data, 0)
+
         if not HEADLESS:
             resize = cv2.resize(self.flipped, dsize=None, fx=2, fy=2)
             cv2.imshow('Intel', resize)
@@ -161,7 +170,7 @@ class ProtossBot(sc2.BotAI):
 
     # Build workers (PROBE sc2.constants)
     async def build_workers(self):
-        if len(self.units(NEXUS))*16 > len(self.units(PROBE)):
+        if len(self.units(NEXUS)) * 16 > len(self.units(PROBE)):
             if len(self.units(PROBE)) < self.MAX_WORKERS:
                 # Nexus built and without production
                 for nexus in self.units(NEXUS).ready.noqueue:
@@ -206,7 +215,7 @@ class ProtossBot(sc2.BotAI):
     # Expand the empire
     async def expand(self):
         # Max 3 nexus
-        if self.units(NEXUS).amount < 3 and self.can_afford(NEXUS):
+        if self.units(NEXUS).amount < (self.time / 2) and self.can_afford(NEXUS):
             await self.expand_now()
 
     # Build offensive force buildings (GATEWAY, CYBERNETICSCORE, STARGATE sc2.constants)
@@ -229,7 +238,7 @@ class ProtossBot(sc2.BotAI):
                         await self.build(ROBOTICSFACILITY, near=pylon)
             # Build a Stargate
             if self.units(CYBERNETICSCORE).ready.exists:
-                if len(self.units(STARGATE)) < (self.iteration / self.ITERATIONS_PER_MINUTE):
+                if len(self.units(STARGATE)) < self.time:
                     if self.can_afford(STARGATE) and not self.already_pending(STARGATE):
                         await self.build(STARGATE, near=pylon)
 
@@ -256,26 +265,43 @@ class ProtossBot(sc2.BotAI):
     # Attack the enemy
     async def attack(self):
         if len(self.units(VOIDRAY).idle) > 0:
-            choice = random.randrange(0, 4)
             target = False
-            if self.iteration > self.do_something_after:
+            if self.time > self.do_something_after:
+
+                if self.use_model:
+                    # Use the model
+                    prediction = self.model.predict([self.flipped.reshape([-1, 176, 200, 3])])
+                    choice = np.argmax(prediction[0])
+
+                    choice_dict = {
+                        0: "No Attack!",
+                        1: "Attack close to our nexus!",
+                        2: "Attack Enemy Structure!",
+                        3: "Attack Enemy Start!"
+                    }
+
+                    print("Choice #{}:{}".format(choice, choice_dict[choice]))
+
+                else:
+                    choice = random.randrange(0, 4)
+
                 if choice == 0:
                     # no attack
-                    wait = random.randrange(20, 165)
-                    self.do_something_after = self.iteration + wait
+                    wait = random.randrange(7, 100) / 100
+                    self.do_something_after = self.time + wait
 
                 elif choice == 1:
-                    #attack_unit_closest_nexus
+                    # attack_unit_closest_nexus
                     if len(self.known_enemy_units) > 0:
                         target = self.known_enemy_units.closest_to(random.choice(self.units(NEXUS)))
 
                 elif choice == 2:
-                    #attack enemy structures
+                    # attack enemy structures
                     if len(self.known_enemy_structures) > 0:
                         target = random.choice(self.known_enemy_structures)
 
                 elif choice == 3:
-                    #attack_enemy_start
+                    # attack_enemy_start
                     target = self.enemy_start_locations[0]
 
                 if target:
@@ -288,6 +314,6 @@ class ProtossBot(sc2.BotAI):
 
 # Run the game
 run_game(maps.get("AbyssalReefLE"), [
-    Bot(Race.Protoss, ProtossBot()),
+    Bot(Race.Protoss, ProtossBot(use_model=True)),
     Computer(Race.Terran, Difficulty.Easy)
 ], realtime=False)
